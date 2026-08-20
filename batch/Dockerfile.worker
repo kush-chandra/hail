@@ -9,7 +9,9 @@ RUN hail-apt-get-install \
     openjdk-11-jre-headless \
     liblapack3 \
     xfsprogs \
-    libyajl-dev
+    libyajl-dev \
+    unzip
+
 
 {% if global.cloud == "gcp" or global.cloud == "aws" %}
 RUN echo "APT::Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80-retries && \
@@ -37,6 +39,10 @@ RUN hail-apt-get-install ca-certificates pkg-config libfuse-dev cmake libcurl4-g
 
 {% else %}
 RUN echo "!!! UNEXPECTED CLOUD {{global.cloud}} !!!" && exit 1
+{% endif %}
+
+{% if global.cloud == "aws" %}
+RUN curl -fsSL https://awscli.amazonaws.com/v2/install.sh | bash -s -- -q
 {% endif %}
 
 COPY hail/python/hailtop/pinned-requirements.txt hailtop-requirements.txt
