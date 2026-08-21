@@ -87,7 +87,7 @@ ssl-mode={self.ssl_mode}
     def from_dict(d: Dict[str, Any]) -> 'SQLConfig':
         for k in ('host', 'port', 'user', 'password', 'instance', 'connection_name', 'ssl-ca', 'ssl-mode'):
             assert k in d, f'{k} should be in {d}'
-            assert d[k] is not None, f'{k} should not be None in {d}'
+            assert d.get(k) is not None, f'{k} should not be None in {d}'
         return SQLConfig(
             host=d['host'],
             port=d['port'],
