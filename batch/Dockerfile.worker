@@ -12,7 +12,6 @@ RUN hail-apt-get-install \
     libyajl-dev \
     unzip
 
-
 {% if global.cloud == "gcp" or global.cloud == "aws" %}
 RUN echo "APT::Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80-retries && \
     hail-apt-get-install curl gnupg && \
