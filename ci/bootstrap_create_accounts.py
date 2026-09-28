@@ -48,8 +48,10 @@ async def insert_user_if_not_exists(app, username, login_id, system_roles, is_se
         credentials_json = base64.b64decode(secret.data['key.json']).decode()
         credentials = json.loads(credentials_json)
 
-        if CLOUD == 'gcp' or CLOUD == 'aws':
+        if CLOUD == 'gcp':
             hail_identity = credentials['client_email']
+        elif CLOUD == 'aws':
+            hail_identity = credentials['Arn']
         else:
             assert CLOUD == 'azure'
             hail_identity = credentials['appObjectId']
