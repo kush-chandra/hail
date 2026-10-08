@@ -42,7 +42,6 @@ Resources:
           internal_ip: !GetAtt VdcInternalGatewayAddress.PrimaryPrivateIpAddress
           ip: !GetAtt VdcCluster.Endpoint                       # use the cluster endpoint in place of a static endpoint
           kubernetes_server_url: !GetAtt VdcCluster.Endpoint
-          organization_domain: !Ref DomainName
 
   VdcNonpreemptibleNodeGroup:
     Type: "AWS::EKS::Nodegroup"
@@ -437,6 +436,74 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+
+
+  # Kubernetes service account IAM roles for Pod Identity
+
+  VdcAuthDriverServiceAccountRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/IAMFullAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+              - "sts:TagSession"
+            Effect: "Allow"
+            Principal:
+              Service: "pods.eks.amazonaws.com"
+  VdcAuthDriverServiceAccountPodIdentityAssociation:
+    Type: "AWS::EKS::PodIdentityAssociation"
+    Properties:
+      ClusterName: !Ref VdcCluster
+      Namespace: "default"
+      RoleArn: !GetAtt VdcAuthDriverServiceAccountRole.Arn
+      ServiceAccount: "auth-driver"
+
+  VdcBatchServiceAccountRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+              - "sts:TagSession"
+            Effect: "Allow"
+            Principal:
+              Service: "pods.eks.amazonaws.com"
+  VdcBatchServiceAccountPodIdentityAssociation:
+    Type: "AWS::EKS::PodIdentityAssociation"
+    Properties:
+      ClusterName: !Ref VdcCluster
+      Namespace: "default"
+      RoleArn: !GetAtt VdcBatchServiceAccountRole.Arn
+      ServiceAccount: "batch"
+
+  VdcCiAgentServiceAccountRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+              - "sts:TagSession"
+            Effect: "Allow"
+            Principal:
+              Service: "pods.eks.amazonaws.com"
+  VdcCiAgentServiceAccountPodIdentityAssociation:
+    Type: "AWS::EKS::PodIdentityAssociation"
+    Properties:
+      ClusterName: !Ref VdcCluster
+      Namespace: "default"
+      RoleArn: !GetAtt VdcCiAgentServiceAccountRole.Arn
+      ServiceAccount: "ci-agent"
+
 
   # AWS-managed EKS addons & necessary roles
 
