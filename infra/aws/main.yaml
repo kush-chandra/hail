@@ -622,6 +622,42 @@ Resources:
             }
           }
         - OidcPrefix: !Select [1, !Split ["//", !GetAtt VdcCluster.OpenIdConnectIssuerUrl]]
+  # Used by batch/aws-create-worker-image.sh to pull the root image while building the worker VM image
+  VdcWorkerImageBuilderRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      MaxSessionDuration: 3600
+      RoleName: !Sub "worker-image-builder-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+      Policies:
+        - PolicyName: "pull-root-image"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - "ecr:GetAuthorizationToken"
+                Effect: "Allow"
+                Resource: "*"
+              - Action:
+                  - "ecr:BatchGetImage"
+                  - "ecr:GetDownloadUrlForLayer"
+                Effect: "Allow"
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/hail/ubuntu"
+  VdcWorkerImageBuilderInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: "/"
+      InstanceProfileName: !Sub "worker-image-builder-${AWS::StackName}"
+      Roles:
+        - !Ref VdcWorkerImageBuilderRole
 
 Outputs:
   VdcClusterName:

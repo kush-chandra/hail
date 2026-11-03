@@ -12,6 +12,7 @@ apt-get install -y \
     apt-transport-https \
     ca-certificates \
     curl \
+    gnupg \
     jq \
     software-properties-common \
     xfsprogs \
@@ -32,15 +33,6 @@ rm -rf /var/lib/apt/lists/*
 
 [ -f /etc/docker/daemon.json ] || echo "{}" > /etc/docker/daemon.json
 
-echo "=== Installing docker-credential-gcr ==="
-VERSION=2.0.4
-OS=linux
-ARCH=amd64
-
-curl -fsSL "https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${VERSION}/docker-credential-gcr_${OS}_${ARCH}-${VERSION}.tar.gz" \
-  | tar xz --to-stdout ./docker-credential-gcr \
-	> /usr/bin/docker-credential-gcr && chmod +x /usr/bin/docker-credential-gcr
-
 echo "=== Adding NVIDIA container toolkit apt repo ==="
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
      | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
@@ -52,31 +44,44 @@ echo "=== Installing build tools and kernel headers ==="
 apt-get update
 apt-get install -y build-essential linux-headers-$(uname -r)
 
+echo "=== Installing amazon-ecr-credential-helper ==="
+apt-get install -y amazon-ecr-credential-helper
+
 echo "=== Downloading NVIDIA driver ==="
-wget --no-verbose https://us.download.nvidia.com/XFree86/Linux-x86_64/595.58.03/NVIDIA-Linux-x86_64-595.58.03.run
-echo "8c0d4f967b7932c4ab5714272aee8103392b0a702c92afa555176d36205829f9  NVIDIA-Linux-x86_64-595.58.03.run" | sha256sum -c
-chmod +x NVIDIA-Linux-x86_64-595.58.03.run
+curl -fsSLO https://us.download.nvidia.com/XFree86/Linux-x86_64/595.91.07/NVIDIA-Linux-x86_64-595.91.07.run
+echo "ca23c88dd24b07a191644e1e11cfb7bcdd7537305749af40f980018b095e6313  NVIDIA-Linux-x86_64-595.91.07.run" | sha256sum -c
+chmod +x NVIDIA-Linux-x86_64-595.91.07.run
 
 echo "=== Running NVIDIA driver installer ==="
 touch /var/log/nvidia-installer.log
 tail -f /var/log/nvidia-installer.log &
 NVIDIA_LOG_PID=$!
-./NVIDIA-Linux-x86_64-595.58.03.run --silent
+./NVIDIA-Linux-x86_64-595.91.07.run --silent
 kill $NVIDIA_LOG_PID
 
 echo "=== Installing NVIDIA container toolkit ==="
 apt-get --yes install nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker
 
-echo "=== Installing Google Cloud Ops Agent ==="
-curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
-bash add-google-cloud-ops-agent-repo.sh --also-install --version=2.*.*
+echo "=== Installing Amazon CloudWatch Agent ==="
+curl -fsSLO https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+dpkg -i amazon-cloudwatch-agent.deb
+rm amazon-cloudwatch-agent.deb
 
-echo "=== Configuring Docker with GCR credentials and pulling root image ==="
+echo "=== Configuring Docker with ECR credentials and pulling root image ==="
 # avoid "unable to get current user home directory: os/user lookup failed"
 export HOME=/root
 
-docker-credential-gcr configure-docker --include-artifact-registry
+IMDS_TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+AWS_ACCOUNT_ID=$(curl -fsS -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .accountId)
+# aws_region is always us-east-1
+ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+
+mkdir -p /root/.docker
+[ -f /root/.docker/config.json ] || echo "{}" > /root/.docker/config.json
+jq --arg registry "${ECR_REGISTRY}" '.credHelpers[$registry] = "ecr-login"' /root/.docker/config.json > config.json.tmp
+mv config.json.tmp /root/.docker/config.json
+
 docker pull {{ global.docker_root_image }}
 
 echo "=== Disabling algif_aead kernel module (copy.fail / CVE-2026-31431) ==="
@@ -94,6 +99,9 @@ jq '.debug = true' /etc/docker/daemon.json > daemon.json.tmp
 mv daemon.json.tmp /etc/docker/daemon.json
 
 systemctl restart docker
+
+echo "=== Cleaning cloud-init state so workers rerun cloud-init on first boot ==="
+cloud-init clean --logs
 
 echo "=== Startup complete, shutting down ==="
 shutdown -h now

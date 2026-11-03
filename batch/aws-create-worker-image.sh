@@ -10,7 +10,7 @@ if [ -z "${NAMESPACE}" ]; then
     exit 1;
 fi
 
-REGION=us-east-1  #$(get_global_config_field aws_region $NAMESPACE)
+REGION=$(get_global_config_field aws_region $NAMESPACE)
 DOCKER_ROOT_IMAGE=$(get_global_config_field docker_root_image $NAMESPACE)
 
 # When you bump the WORKER_IMAGE_VERSION, you should also update:
@@ -29,7 +29,8 @@ fi
 UBUNTU_IMAGE=/aws/service/canonical/ubuntu/server-minimal/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
 
 WORKER_IMAGE_EXISTS=false
-if [[ "$(aws ec2 describe-images --filter="Name=tag:Name,Values=${WORKER_IMAGE}" --query="Reservations[*].Instances[*].[InstanceId]" --region "${REGION}")" -ne "null" ]]; then
+WORKER_IMAGE_ID=$(aws ec2 describe-images --owners self --filters "Name=name,Values=${WORKER_IMAGE}" --query="Images[0].ImageId" --output text --region "${REGION}")
+if [[ "$WORKER_IMAGE_ID" != "None" ]]; then
     WORKER_IMAGE_EXISTS=true
     if [ "$NAMESPACE" == "default" ]; then
         echo "ERROR: Image $WORKER_IMAGE already exists in region $REGION. Delete it first or bump WORKER_IMAGE_VERSION."
@@ -53,12 +54,16 @@ create_build_image_instance() {
     python3 ../ci/jinja2_render.py '{"global":{"docker_root_image":"'${DOCKER_ROOT_IMAGE}'"}}' \
         build-batch-worker-image-startup-aws.sh build-batch-worker-image-startup-aws.sh.out
 
-    UBUNTU_AMI_ID=$(aws ssm get-parameter --name "$UBUNTU_IMAGE" --query="Parameter.Value" --output text)
+    UBUNTU_AMI_ID=$(aws ssm get-parameter --name "$UBUNTU_IMAGE" --query="Parameter.Value" --output text --region ${REGION})
+    SUBNET_ID=$(aws cloudformation list-exports --query="Exports[?Name=='VdcSubnet'].Value" --output text --region ${REGION})
 
     BUILDER_ID=$(aws ec2 run-instances \
         --image-id ${UBUNTU_AMI_ID} \
         --count 1 \
-        --instance-type t2.large \
+        --instance-type t3.large \
+        --subnet-id ${SUBNET_ID} \
+        --iam-instance-profile Name=worker-image-builder-hail-vdc \
+        --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=10,VolumeType=gp3}" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value='${BUILDER}'}]" \
         --user-data file://build-batch-worker-image-startup-aws.sh.out \
 	--region ${REGION} \
@@ -69,13 +74,21 @@ create_build_image_instance() {
 
 create_worker_image() {
     if [ "$WORKER_IMAGE_EXISTS" == "true" ]; then
-        aws ec2 deregister-image --image-id $WORKER_IMAGE --region $REGION
+        aws ec2 deregister-image --image-id $WORKER_IMAGE_ID --region $REGION
     fi
 
-    aws ec2 create-image \
+    NEW_IMAGE_ID=$(aws ec2 create-image \
         --instance-id ${BUILDER_ID} \
         --name ${WORKER_IMAGE} \
-        --region ${REGION}
+        --region ${REGION} \
+        --query="ImageId" \
+        --output text
+    )
+
+    while [ "$(aws ec2 describe-images --image-ids ${NEW_IMAGE_ID} --query='Images[0].State' --output text --region ${REGION})" != "available" ];
+    do
+        sleep 15
+    done
 
     aws ec2 terminate-instances \
         --instance-ids ${BUILDER_ID} \
@@ -85,7 +98,7 @@ create_worker_image() {
 main() {
     set -x
     create_build_image_instance
-    while [ "$(aws ec2 describe-instance-status --instance-ids ${BUILDER_ID} --include-all-instances --query='InstanceStatuses[0].InstanceState.Name' --output text)" != "stopped" ];
+    while [ "$(aws ec2 describe-instance-status --instance-ids ${BUILDER_ID} --include-all-instances --query='InstanceStatuses[0].InstanceState.Name' --output text --region ${REGION})" != "stopped" ];
     do
         sleep 5
     done
