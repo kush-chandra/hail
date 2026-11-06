@@ -89,7 +89,6 @@ from web_common import (
 from ..batch import batch_record_to_dict, cancel_job_group_in_db, job_group_record_to_dict, job_record_to_dict
 from ..batch_configuration import BATCH_STORAGE_URI, CLOUD, DEFAULT_NAMESPACE, DOCKERHUB_PREFIX, SCOPE
 from ..batch_format_version import BatchFormatVersion
-from ..cloud.aws.resource_utils import aws_cores_mcpu_to_memory_bytes
 from ..cloud.azure.resource_utils import azure_cores_mcpu_to_memory_bytes
 from ..cloud.gcp.resource_utils import GCP_MACHINE_FAMILY, gcp_cores_mcpu_to_memory_bytes
 from ..cloud.resource_utils import (
@@ -1276,6 +1275,11 @@ WHERE batch_updates.batch_id = %s AND batch_updates.update_id = %s AND user = %s
                     raise web.HTTPBadRequest(reason=f'unacceptable JAR url: {jar_url}')
 
         req_memory_bytes: Optional[int]
+        if machine_type is None and CLOUD == 'aws':
+            # TODO: support pools on AWS
+            raise web.HTTPBadRequest(
+                reason=f'bad resource request for job {id}: only jobs with a machine_type are supported on AWS'
+            )
         if machine_type is None:
             if 'cpu' not in resources:
                 resources['cpu'] = BATCH_JOB_DEFAULT_CPU
@@ -1300,8 +1304,6 @@ WHERE batch_updates.batch_id = %s AND batch_updates.update_id = %s AND user = %s
                 worker_type = memory_to_worker_types[req_memory]
                 if CLOUD == 'gcp':
                     req_memory_bytes = gcp_cores_mcpu_to_memory_bytes(req_cores_mcpu, GCP_MACHINE_FAMILY, worker_type)
-                elif CLOUD == 'aws':
-                    req_memory_bytes = aws_cores_mcpu_to_memory_bytes(req_cores_mcpu, worker_type)
                 else:
                     assert CLOUD == 'azure'
                     req_memory_bytes = azure_cores_mcpu_to_memory_bytes(req_cores_mcpu, worker_type)

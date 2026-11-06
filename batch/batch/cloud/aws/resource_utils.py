@@ -1,6 +1,5 @@
 import logging
-import math
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 log = logging.getLogger('resource_utils')
 
@@ -38,12 +37,6 @@ AWS_CORES_TO_INSTANCE_SIZE = {
 
 AWS_INSTANCE_SIZE_TO_CORES = {size: cores for cores, size in AWS_CORES_TO_INSTANCE_SIZE.items()}
 
-aws_valid_cores_from_worker_type: Dict[str, List[int]] = {
-    worker_type: list(AWS_CORES_TO_INSTANCE_SIZE.keys()) for worker_type in AWS_WORKER_TYPE_TO_INSTANCE_FAMILY
-}
-
-aws_memory_to_worker_type = {'lowmem': 'highcpu', 'standard': 'standard', 'highmem': 'highmem'}
-
 
 class MachineTypeParts:
     def __init__(self, family: str, worker_type: str, cores: int, memory: int):
@@ -74,8 +67,8 @@ def aws_machine_type_to_parts(machine_type: str) -> Optional[MachineTypeParts]:
 
 aws_valid_machine_types = [
     aws_worker_properties_to_machine_type(worker_type, cores)
-    for worker_type, valid_cores in aws_valid_cores_from_worker_type.items()
-    for cores in valid_cores
+    for worker_type in AWS_WORKER_TYPE_TO_INSTANCE_FAMILY
+    for cores in AWS_CORES_TO_INSTANCE_SIZE
 ]
 
 
@@ -84,10 +77,6 @@ def aws_machine_type_to_cores_and_memory_bytes(machine_type: str) -> Tuple[int, 
     if parts is None:
         raise ValueError(f'bad machine_type: {machine_type}')
     return parts.cores, parts.memory
-
-
-def aws_local_ssd_size(worker_type: str, cores: int) -> int:
-    raise NotImplementedError('local SSD data disks are not supported on AWS')
 
 
 def aws_requested_to_actual_storage_bytes(storage_bytes, allow_zero_storage):
@@ -101,14 +90,3 @@ def aws_requested_to_actual_storage_bytes(storage_bytes, allow_zero_storage):
 
 def aws_is_valid_storage_request(storage_in_gib: int) -> bool:
     return 10 <= storage_in_gib <= AWS_MAX_PERSISTENT_SSD_SIZE_GIB
-
-
-def aws_cores_mcpu_to_memory_bytes(mcpu: int, worker_type: str) -> int:
-    memory_bytes = AWS_MEMORY_PER_CORE_MIB[worker_type] * 1024**2
-    return int((mcpu / 1000) * memory_bytes)
-
-
-def aws_adjust_cores_for_memory_request(cores_in_mcpu: int, memory_in_bytes: int, worker_type: str) -> int:
-    memory_per_core_bytes = AWS_MEMORY_PER_CORE_MIB[worker_type] * 1024**2
-    min_cores_mcpu = math.ceil((memory_in_bytes / memory_per_core_bytes) * 1000)
-    return max(cores_in_mcpu, min_cores_mcpu)

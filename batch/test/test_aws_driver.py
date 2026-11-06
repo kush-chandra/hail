@@ -34,12 +34,13 @@ from batch.cloud.aws.driver.resource_manager import (  # noqa: E402
 )
 from batch.cloud.aws.instance_config import AWSSlimInstanceConfig  # noqa: E402
 from batch.cloud.aws.resource_utils import (  # noqa: E402
+    AWS_CORES_TO_INSTANCE_SIZE,
     aws_machine_type_to_cores_and_memory_bytes,
     aws_machine_type_to_parts,
     aws_valid_machine_types,
     aws_worker_properties_to_machine_type,
 )
-from batch.cloud.resource_utils import possible_cores_from_worker_type, valid_machine_types  # noqa: E402
+from batch.cloud.resource_utils import valid_machine_types  # noqa: E402
 from batch.driver.billing_manager import ProductVersions  # noqa: E402
 from batch.driver.resource_manager import (  # noqa: E402
     UnknownVMState,
@@ -118,7 +119,7 @@ def launch_settings(subnet_ids=('subnet-a', 'subnet-b', 'subnet-c')) -> AWSWorke
     )
 
 
-def instance_config(machine_type='m6i.4xlarge', preemptible=True, job_private=False) -> AWSSlimInstanceConfig:
+def instance_config(machine_type='m6i.4xlarge', preemptible=True, job_private=True) -> AWSSlimInstanceConfig:
     return AWSSlimInstanceConfig.create(
         product_versions=ProductVersions({}),
         machine_type=machine_type,
@@ -145,7 +146,7 @@ def test_worker_type_and_cores_to_machine_type():
     assert aws_machine_type_to_parts('n2-standard-16') is None
 
     for worker_type in ('standard', 'highmem', 'highcpu'):
-        for cores in possible_cores_from_worker_type('aws', worker_type):
+        for cores in AWS_CORES_TO_INSTANCE_SIZE:
             machine_type = aws_worker_properties_to_machine_type(worker_type, cores)
             parts = aws_machine_type_to_parts(machine_type)
             assert parts is not None
@@ -197,7 +198,7 @@ def test_ec2_state_to_vm_state(state, expected):
         assert vm_state.last_state_change_timestamp_msecs == 1000
 
 
-def vm_config(preemptible: bool, job_private: bool = False) -> Dict[str, Any]:
+def vm_config(preemptible: bool, job_private: bool = True) -> Dict[str, Any]:
     return create_instance.create_vm_config(
         FakeFileStore(),  # type: ignore
         {},
@@ -268,15 +269,10 @@ def test_user_data_fits_and_runs_the_worker(global_config):
     assert 'python3 -u -m batch.worker.worker' in script
     assert 'shutdown -h now' in script
     assert '--destination 169.254.169.254 --jump DROP' in script
-    # 375 GiB data disk - 30 GiB reserved for images - 5 GiB per core for 16 cores
-    assert 'UNRESERVED_WORKER_DATA_DISK_SIZE_GB=265' in script
+    # job private instances have the whole data disk
+    assert 'UNRESERVED_WORKER_DATA_DISK_SIZE_GB=375' in script
     # python format braces must not leak into the shell script
     assert '{{' not in script.replace("'{{.Id}}'", '')
-
-
-def test_user_data_unreserved_storage_for_job_private(global_config):
-    script = gzip.decompress(vm_config(preemptible=False, job_private=True)['UserData']).decode()
-    assert 'UNRESERVED_WORKER_DATA_DISK_SIZE_GB=375' in script
 
 
 async def make_resource_manager(ec2_client, subnet_ids=('subnet-a', 'subnet-b', 'subnet-c')) -> AWSResourceManager:
@@ -299,7 +295,7 @@ async def test_create_vm_retries_other_subnets_on_zonal_capacity_errors(global_c
         375,
         30,
         True,
-        False,
+        True,
         'us-east-1',
         'm6i.4xlarge',
         config,

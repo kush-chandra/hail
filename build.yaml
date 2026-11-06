@@ -2593,8 +2593,8 @@ steps:
       - name: add-dockerhub-proxy-flag
         script: /io/sql/120-add-dockerhub-proxy-flag.sql
         online: true
-      - name: aws-pools
-        script: /io/sql/121-aws-pools.py
+      - name: aws-job-private
+        script: /io/sql/121-aws-job-private.py
         online: true
     inputs:
       - from: /repo/batch/sql

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Dict
 
@@ -10,7 +9,7 @@ from hailtop import aiotools
 from hailtop.aiocloud import aioaws
 
 from ....driver.driver import CloudDriver
-from ....driver.instance_collection import InstanceCollectionManager, JobPrivateInstanceManager, Pool
+from ....driver.instance_collection import InstanceCollectionManager, JobPrivateInstanceManager
 from ....inst_coll_config import InstanceCollectionConfigs
 from .billing_manager import AWSBillingManager
 from .location import AWSLocationMonitor
@@ -109,34 +108,20 @@ ON DUPLICATE KEY UPDATE region = region;
 
         task_manager = aiotools.BackgroundTaskManager()
 
-        create_pools_coros = [
-            Pool.create(
-                app,
-                db,
-                inst_coll_manager,
-                resource_manager,
-                machine_name_prefix,
-                config,
-                app['async_worker_pool'],
-                task_manager,
-            )
-            for config in inst_coll_configs.name_pool_config.values()
-        ]
+        # TODO: support pools. Only job private instances are supported on AWS for now, so the pools
+        # in the database are not started.
+        if inst_coll_configs.name_pool_config:
+            log.info(f'not starting pools on AWS: {sorted(inst_coll_configs.name_pool_config)}')
 
-        jpim, *_ = await asyncio.gather(
-            JobPrivateInstanceManager.create(
-                app,
-                db,
-                inst_coll_manager,
-                resource_manager,
-                machine_name_prefix,
-                inst_coll_configs.jpim_config,
-                task_manager,
-            ),
-            *create_pools_coros,
+        jpim = await JobPrivateInstanceManager.create(
+            app,
+            db,
+            inst_coll_manager,
+            resource_manager,
+            machine_name_prefix,
+            inst_coll_configs.jpim_config,
+            task_manager,
         )
-
-        assert isinstance(jpim, JobPrivateInstanceManager)
         driver = AWSDriver(
             db,
             machine_name_prefix,
