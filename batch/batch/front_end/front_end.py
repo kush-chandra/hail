@@ -89,6 +89,7 @@ from web_common import (
 from ..batch import batch_record_to_dict, cancel_job_group_in_db, job_group_record_to_dict, job_record_to_dict
 from ..batch_configuration import BATCH_STORAGE_URI, CLOUD, DEFAULT_NAMESPACE, DOCKERHUB_PREFIX, SCOPE
 from ..batch_format_version import BatchFormatVersion
+from ..cloud.aws.resource_utils import aws_cores_mcpu_to_memory_bytes
 from ..cloud.azure.resource_utils import azure_cores_mcpu_to_memory_bytes
 from ..cloud.gcp.resource_utils import GCP_MACHINE_FAMILY, gcp_cores_mcpu_to_memory_bytes
 from ..cloud.resource_utils import (
@@ -1299,6 +1300,8 @@ WHERE batch_updates.batch_id = %s AND batch_updates.update_id = %s AND user = %s
                 worker_type = memory_to_worker_types[req_memory]
                 if CLOUD == 'gcp':
                     req_memory_bytes = gcp_cores_mcpu_to_memory_bytes(req_cores_mcpu, GCP_MACHINE_FAMILY, worker_type)
+                elif CLOUD == 'aws':
+                    req_memory_bytes = aws_cores_mcpu_to_memory_bytes(req_cores_mcpu, worker_type)
                 else:
                     assert CLOUD == 'azure'
                     req_memory_bytes = azure_cores_mcpu_to_memory_bytes(req_cores_mcpu, worker_type)
@@ -1395,6 +1398,9 @@ WHERE batch_updates.batch_id = %s AND batch_updates.update_id = %s AND user = %s
 
             if cloud == 'azure' and all(envvar['name'] != 'AZURE_APPLICATION_CREDENTIALS' for envvar in spec['env']):
                 spec['env'].append({'name': 'AZURE_APPLICATION_CREDENTIALS', 'value': '/gsa-key/key.json'})
+
+            if cloud == 'aws' and all(envvar['name'] != 'AWS_APPLICATION_CREDENTIALS' for envvar in spec['env']):
+                spec['env'].append({'name': 'AWS_APPLICATION_CREDENTIALS', 'value': '/gsa-key/key.json'})
 
         cloudfuse = spec.get('gcsfuse') or spec.get('cloudfuse')
         if cloudfuse:

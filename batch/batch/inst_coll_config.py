@@ -4,6 +4,12 @@ from typing import Dict, Optional, Tuple
 
 from gear import Database
 
+from .cloud.aws.instance_config import AWSSlimInstanceConfig
+from .cloud.aws.resource_utils import (
+    aws_adjust_cores_for_memory_request,
+    aws_cores_mcpu_to_memory_bytes,
+    aws_worker_properties_to_machine_type,
+)
 from .cloud.azure.instance_config import AzureSlimInstanceConfig
 from .cloud.azure.resource_utils import (
     azure_adjust_cores_for_memory_request,
@@ -42,6 +48,17 @@ def instance_config_from_pool_config(
         return GCPSlimInstanceConfig.create(
             product_versions=product_versions,
             machine_type=machine_type,
+            preemptible=pool_config.preemptible,
+            local_ssd_data_disk=pool_config.worker_local_ssd_data_disk,
+            data_disk_size_gb=pool_config.data_disk_size_gb,
+            boot_disk_size_gb=pool_config.boot_disk_size_gb,
+            job_private=False,
+            location=location,
+        )
+    if cloud == 'aws':
+        return AWSSlimInstanceConfig.create(
+            product_versions=product_versions,
+            machine_type=aws_worker_properties_to_machine_type(pool_config.worker_type, pool_config.worker_cores),
             preemptible=pool_config.preemptible,
             local_ssd_data_disk=pool_config.worker_local_ssd_data_disk,
             data_disk_size_gb=pool_config.data_disk_size_gb,
@@ -200,6 +217,10 @@ WHERE pools.name = %s;
             )
             cores_mcpu = adjust_cores_for_packability(cores_mcpu)
             memory_bytes = gcp_cores_mcpu_to_memory_bytes(cores_mcpu, GCP_MACHINE_FAMILY, self.worker_type)
+        elif self.cloud == 'aws':
+            cores_mcpu = aws_adjust_cores_for_memory_request(cores_mcpu, memory_bytes, self.worker_type)
+            cores_mcpu = adjust_cores_for_packability(cores_mcpu)
+            memory_bytes = aws_cores_mcpu_to_memory_bytes(cores_mcpu, self.worker_type)
         else:
             assert self.cloud == 'azure'
             cores_mcpu = azure_adjust_cores_for_memory_request(cores_mcpu, memory_bytes, self.worker_type)

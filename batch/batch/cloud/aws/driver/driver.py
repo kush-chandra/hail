@@ -2,18 +2,72 @@ import asyncio
 import logging
 from typing import Dict
 
+import boto3
+
 from gear import Database
 from gear.cloud_config import get_aws_config
 from hailtop import aiotools
+from hailtop.aiocloud import aioaws
 
 from ....driver.driver import CloudDriver
 from ....driver.instance_collection import InstanceCollectionManager, JobPrivateInstanceManager, Pool
 from ....inst_coll_config import InstanceCollectionConfigs
 from .billing_manager import AWSBillingManager
 from .location import AWSLocationMonitor
-from .resource_manager import AWSResourceManager
+from .resource_manager import AWSResourceManager, AWSWorkerLaunchSettings
 
 log = logging.getLogger('driver')
+
+# NB: create a new worker image with aws-create-worker-image.sh
+WORKER_IMAGE_VERSION = 33
+
+# Worker network resources are found by naming convention, like the GCP and Azure drivers.
+# See infra/aws/main.yaml.
+WORKER_SUBNET_TAG = 'hail-batch-worker'
+WORKER_SECURITY_GROUP_NAME = 'batch-worker'
+WORKER_INSTANCE_PROFILE_NAME = 'batch-worker'
+
+
+def worker_image_name(namespace: str) -> str:
+    if namespace == 'default':
+        return f'batch-worker-{WORKER_IMAGE_VERSION}'
+    return f'batch-worker-{namespace}-{WORKER_IMAGE_VERSION}'
+
+
+async def resolve_worker_launch_settings(ec2_client: aioaws.AwsEc2Client, namespace: str) -> AWSWorkerLaunchSettings:
+    image_name = worker_image_name(namespace)
+    images = await ec2_client.describe_images(['self'], [{'Name': 'name', 'Values': [image_name]}])
+    if not images:
+        raise ValueError(f'could not find worker image {image_name}')
+    assert len(images) == 1, images
+    image = images[0]
+
+    subnets = await ec2_client.describe_subnets([{'Name': f'tag:{WORKER_SUBNET_TAG}', 'Values': ['true']}])
+    if not subnets:
+        raise ValueError(f'could not find any subnets tagged {WORKER_SUBNET_TAG}=true')
+    vpc_ids = {subnet['VpcId'] for subnet in subnets}
+    assert len(vpc_ids) == 1, vpc_ids
+
+    security_groups = await ec2_client.describe_security_groups([
+        {'Name': 'group-name', 'Values': [WORKER_SECURITY_GROUP_NAME]},
+        {'Name': 'vpc-id', 'Values': list(vpc_ids)},
+    ])
+    if not security_groups:
+        raise ValueError(f'could not find security group {WORKER_SECURITY_GROUP_NAME} in {vpc_ids}')
+    assert len(security_groups) == 1, security_groups
+
+    settings = AWSWorkerLaunchSettings(
+        image_id=image['ImageId'],
+        root_device_name=image['RootDeviceName'],
+        subnet_ids=[subnet['SubnetId'] for subnet in subnets],
+        security_group_id=security_groups[0]['GroupId'],
+        instance_profile_name=WORKER_INSTANCE_PROFILE_NAME,
+    )
+    log.info(
+        f'worker image {image_name} ({settings.image_id}), subnets {settings.subnet_ids}, '
+        f'security group {settings.security_group_id}'
+    )
+    return settings
 
 
 class AWSDriver(CloudDriver):
@@ -45,10 +99,13 @@ ON DUPLICATE KEY UPDATE region = region;
         assert max(db_regions.values()) < 64, str(db_regions)
         app['regions'] = db_regions
 
+        ec2_client = aioaws.AwsEc2Client(session=boto3.session.Session(region_name=region))
+        launch_settings = await resolve_worker_launch_settings(ec2_client, namespace)
+
         location_monitor = AWSLocationMonitor(region)
         billing_manager = await AWSBillingManager.create(db)
         inst_coll_manager = InstanceCollectionManager(db, machine_name_prefix, location_monitor, region, regions)
-        resource_manager = AWSResourceManager()
+        resource_manager = AWSResourceManager(region, ec2_client, billing_manager, launch_settings)
 
         task_manager = aiotools.BackgroundTaskManager()
 
@@ -88,6 +145,7 @@ ON DUPLICATE KEY UPDATE region = region;
             inst_coll_manager,
             jpim,
             billing_manager,
+            ec2_client,
             task_manager,
         )
 
@@ -104,6 +162,7 @@ ON DUPLICATE KEY UPDATE region = region;
         inst_coll_manager: InstanceCollectionManager,
         job_private_inst_manager: JobPrivateInstanceManager,
         billing_manager: AWSBillingManager,
+        ec2_client: aioaws.AwsEc2Client,
         task_manager: aiotools.BackgroundTaskManager,
     ):
         self.db = db
@@ -113,6 +172,7 @@ ON DUPLICATE KEY UPDATE region = region;
         self.job_private_inst_manager = job_private_inst_manager
         self._billing_manager = billing_manager
         self._inst_coll_manager = inst_coll_manager
+        self._ec2_client = ec2_client
         self._task_manager = task_manager
 
     @property
@@ -127,7 +187,10 @@ ON DUPLICATE KEY UPDATE region = region;
         try:
             await self._task_manager.shutdown_and_wait()
         finally:
-            await self._billing_manager.close()
+            try:
+                await self._billing_manager.close()
+            finally:
+                await self._ec2_client.close()
 
     def get_quotas(self):
         return {}

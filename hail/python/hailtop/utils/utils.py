@@ -1050,7 +1050,7 @@ def path_str(path: Union[str, os.PathLike]) -> str:
         raise ValueError(f'path value is neither string nor path-like. Found {type(path)!r} instead.')
 
 
-RegistryProvider = Literal['google', 'azure', 'dockerhub']
+RegistryProvider = Literal['google', 'azure', 'aws', 'dockerhub']
 
 
 class ParsedDockerImageReference:
@@ -1070,6 +1070,9 @@ class ParsedDockerImageReference:
             return self.domain is not None and (self.domain == 'gcr.io' or self.domain.endswith('docker.pkg.dev'))
         if registry == 'azure':
             return self.domain is not None and self.domain.endswith('azurecr.io')
+        if registry == 'aws':
+            # private ECR registries have the form {account}.dkr.ecr.{region}.amazonaws.com
+            return self.domain is not None and '.dkr.ecr.' in self.domain and self.domain.endswith('.amazonaws.com')
         assert registry == 'dockerhub'
         return self.domain is None or self.domain == 'docker.io'
 

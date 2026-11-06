@@ -69,6 +69,7 @@ from hailtop.utils import (
 )
 
 from ..batch_format_version import BatchFormatVersion
+from ..cloud.aws.worker.worker_api import AWSWorkerAPI
 from ..cloud.azure.worker.worker_api import AzureWorkerAPI
 from ..cloud.gcp.resource_utils import is_gpu
 from ..cloud.gcp.worker.worker_api import GCPWorkerAPI
@@ -502,8 +503,10 @@ class Image:
 
     @property
     def is_cloud_image(self):
-        return (CLOUD == 'gcp' and self.image_ref.hosted_in('google')) or (
-            CLOUD == 'azure' and self.image_ref.hosted_in('azure')
+        return (
+            (CLOUD == 'gcp' and self.image_ref.hosted_in('google'))
+            or (CLOUD == 'azure' and self.image_ref.hosted_in('azure'))
+            or (CLOUD == 'aws' and self.image_ref.hosted_in('aws'))
         )
 
     @property
@@ -3571,6 +3574,8 @@ async def async_main():
 
     if CLOUD == 'gcp':
         CLOUD_WORKER_API = await GCPWorkerAPI.from_env()
+    elif CLOUD == 'aws':
+        CLOUD_WORKER_API = AWSWorkerAPI.from_env()
     else:
         assert CLOUD == 'azure'
         if os.environ.get('HAIL_TERRA'):

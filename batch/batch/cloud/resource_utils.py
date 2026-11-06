@@ -3,6 +3,15 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 from ..globals import RESERVED_STORAGE_GB_PER_CORE
+from .aws.resource_utils import (
+    aws_is_valid_storage_request,
+    aws_local_ssd_size,
+    aws_machine_type_to_cores_and_memory_bytes,
+    aws_memory_to_worker_type,
+    aws_requested_to_actual_storage_bytes,
+    aws_valid_cores_from_worker_type,
+    aws_valid_machine_types,
+)
 from .azure.resource_utils import (
     azure_is_valid_storage_request,
     azure_local_ssd_size,
@@ -33,6 +42,8 @@ def round_up_division(numerator: int, denominator: int) -> int:
 def possible_cores_from_worker_type(cloud: str, worker_type: str) -> List[int]:
     if cloud == 'azure':
         return azure_valid_cores_from_worker_type[worker_type]
+    if cloud == 'aws':
+        return aws_valid_cores_from_worker_type[worker_type]
     assert cloud == 'gcp'
     return gcp_valid_cores_for_pool_worker_type[worker_type]
 
@@ -40,6 +51,8 @@ def possible_cores_from_worker_type(cloud: str, worker_type: str) -> List[int]:
 def valid_machine_types(cloud: str) -> List[str]:
     if cloud == 'azure':
         return azure_valid_machine_types
+    if cloud == 'aws':
+        return aws_valid_machine_types
     assert cloud == 'gcp'
     return gcp_valid_machine_types
 
@@ -47,6 +60,8 @@ def valid_machine_types(cloud: str) -> List[str]:
 def memory_to_worker_type(cloud: str) -> Dict[str, str]:
     if cloud == 'azure':
         return azure_memory_to_worker_type
+    if cloud == 'aws':
+        return aws_memory_to_worker_type
     assert cloud == 'gcp'
     return gcp_memory_to_worker_type
 
@@ -54,6 +69,8 @@ def memory_to_worker_type(cloud: str) -> Dict[str, str]:
 def machine_type_to_cores_and_memory_bytes(cloud: str, machine_type: str) -> Tuple[int, int]:
     if cloud == 'azure':
         return azure_machine_type_to_cores_and_memory_bytes(machine_type)
+    if cloud == 'aws':
+        return aws_machine_type_to_cores_and_memory_bytes(machine_type)
     assert cloud == 'gcp'
     return gcp_machine_type_to_cores_and_memory_bytes(machine_type)
 
@@ -69,6 +86,8 @@ def requested_storage_bytes_to_actual_storage_gib(
 ) -> Optional[int]:
     if cloud == 'azure':
         actual_storage_bytes = azure_requested_to_actual_storage_bytes(storage_bytes, allow_zero_storage)
+    elif cloud == 'aws':
+        actual_storage_bytes = aws_requested_to_actual_storage_bytes(storage_bytes, allow_zero_storage)
     else:
         assert cloud == 'gcp'
         actual_storage_bytes = gcp_requested_to_actual_storage_bytes(storage_bytes, allow_zero_storage)
@@ -108,6 +127,8 @@ def is_valid_cores_mcpu(cores_mcpu: int) -> bool:
 def is_valid_storage_request(cloud: str, storage_in_gib: int) -> bool:
     if cloud == 'azure':
         return azure_is_valid_storage_request(storage_in_gib)
+    if cloud == 'aws':
+        return aws_is_valid_storage_request(storage_in_gib)
     assert cloud == 'gcp'
     return gcp_is_valid_storage_request(storage_in_gib)
 
@@ -115,5 +136,7 @@ def is_valid_storage_request(cloud: str, storage_in_gib: int) -> bool:
 def local_ssd_size(cloud: str, worker_type: str, cores: int) -> int:
     if cloud == 'azure':
         return azure_local_ssd_size(worker_type, cores)
+    if cloud == 'aws':
+        return aws_local_ssd_size(worker_type, cores)
     assert cloud == 'gcp', cloud
     return gcp_local_ssd_size(GCP_MACHINE_FAMILY, cores)
